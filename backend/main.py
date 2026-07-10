@@ -30,17 +30,22 @@ app.add_middleware(
 # ---------------------------------------------------------------
 # This serves our frontend files (HTML, JS, CSS) directly from
 # the server, so we don't need a separate frontend server.
+# Note: "../frontend" goes one level up from backend/ to find
+# the frontend/ folder sitting next to it.
 # ---------------------------------------------------------------
 app.mount("/static", StaticFiles(directory="../frontend"), name="static")
 
 # Make sure the uploads folder exists when the server starts
+# exist_ok=True means: don't crash if the folder already exists
 os.makedirs("../uploads", exist_ok=True)
 
 
 # ---------------------------------------------------------------
 # ROUTE 1: GET /
 # When someone visits http://localhost:8000 in their browser,
-# they get redirected to our frontend HTML page.
+# they get the frontend HTML page served directly.
+# "response_class=HTMLResponse" tells FastAPI we're returning HTML,
+# not JSON.
 # ---------------------------------------------------------------
 @app.get("/", response_class=HTMLResponse)
 async def root():
