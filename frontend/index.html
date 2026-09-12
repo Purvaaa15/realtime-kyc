@@ -9,38 +9,87 @@
 <body>
 
   <div class="container">
-    <h1>Real-Time KYC Verification</h1>
-    <p class="subtitle">Position your face in the frame below</p>
 
-    <!-- -------------------------------------------------------
-      The video element shows the live camera feed.
-      "autoplay" starts it immediately.
-      "playsinline" needed for mobile browsers.
-      "muted" prevents audio feedback.
-    -------------------------------------------------------- -->
-    <div class="video-wrapper">
+    <!-- Header -->
+    <div class="header">
+      <h1>🔐 Real-Time KYC Verification</h1>
+      <p class="subtitle">Complete your identity verification in real time</p>
+    </div>
+
+    <!-- Status bar — shows what step we're on -->
+    <div class="status-bar">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">Initialising camera...</span>
+    </div>
+
+    <!-- Main content area -->
+    <div class="video-area">
+
+      <!-- The video element shows your live camera feed.
+           "autoplay" starts it immediately.
+           "playsinline" is needed on mobile browsers.
+           "muted" prevents audio feedback. -->
       <video id="video" autoplay playsinline muted></video>
 
-      <!-- This canvas sits on top of the video.
-           In Step 3, we'll draw face landmarks on it.
+      <!-- Canvas sits on TOP of the video (via CSS positioning).
+           This is where we'll draw face landmarks later.
            For now it's invisible. -->
       <canvas id="overlay"></canvas>
+
+      <!-- Small badge in the corner showing connection state -->
+      <div class="live-badge" id="liveBadge">● LIVE</div>
+
     </div>
 
-    <!-- Status bar — shows what's happening in real time -->
-    <div class="status-bar">
-      <span class="status-dot" id="statusDot"></span>
-      <span id="statusText">Starting camera...</span>
+    <!-- ID Upload section — hidden until liveness passes -->
+    <div class="upload-section" id="uploadSection" style="display:none">
+      <label for="idFileInput" class="upload-box" id="uploadBox">
+        <div class="upload-icon">🪪</div>
+        <div class="upload-text">Click to upload your ID card</div>
+        <div class="upload-hint">JPG, PNG, or PDF — max 10MB</div>
+      </label>
+      <input
+        type="file"
+        id="idFileInput"
+        accept=".jpg,.jpeg,.png,.pdf"
+        style="display:none"
+      />
+      <div class="upload-preview" id="uploadPreview" style="display:none">
+        <img id="previewImage" src="" alt="ID preview" />
+        <span id="previewFilename"></span>
+      </div>
     </div>
 
-    <!-- Shows the server's response to each frame we send -->
-    <div class="server-response" id="serverResponse">
-      Waiting for server...
+    <!-- Step progress indicators -->
+    <div class="steps">
+      <div class="step" id="step1">
+        <div class="step-icon">👤</div>
+        <div class="step-label">Face detected</div>
+      </div>
+      <div class="step" id="step2">
+        <div class="step-icon">👁️</div>
+        <div class="step-label">Liveness check</div>
+      </div>
+      <div class="step" id="step3">
+        <div class="step-icon">🪪</div>
+        <div class="step-label">ID scanned</div>
+      </div>
+      <div class="step" id="step4">
+        <div class="step-icon">✅</div>
+        <div class="step-label">Face matched</div>
+      </div>
+    </div>
+
+    <!-- Result card — hidden until we have a verdict -->
+    <div class="result-card" id="resultCard" style="display:none">
+      <h2 id="resultTitle"></h2>
+      <p id="resultMessage"></p>
     </div>
 
   </div>
 
   <!-- Load our JavaScript file -->
   <script src="/static/app.js"></script>
+
 </body>
 </html>

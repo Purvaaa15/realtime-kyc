@@ -1,5 +1,27 @@
+# Virtual environments
 venv/
+.venv/
+backend/.venv/
+
+# Environment variables (contains DB passwords, secrets)
+.env
+
+# Uploaded/captured files (contains personal photos, ID scans — never commit these)
 uploads/
+
+# Python cache
 __pycache__/
 *.pyc
-.env
+*.pyo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE / tooling
+.vscode/
+.continue/
+*.swp
+
+# Redis dump file (created automatically by Redis)
+dump.rdb
