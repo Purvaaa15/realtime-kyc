@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>KYC Agent Dashboard</title>
+  <link rel="stylesheet" href="/static/dashboard.css" />
+</head>
+<body>
+
+  <!-- LOGIN SCREEN — shown first, hidden after successful login -->
+  <div class="login-screen" id="loginScreen">
+    <div class="login-card">
+      <div class="login-icon">🔐</div>
+      <h1>Agent Dashboard</h1>
+      <p class="login-subtitle">Enter your access password to continue</p>
+      <input
+        type="password"
+        id="passwordInput"
+        placeholder="Password"
+        class="login-input"
+      />
+      <button id="loginButton" class="login-button">Sign In</button>
+      <p class="login-error" id="loginError"></p>
+    </div>
+  </div>
+
+  <!-- DASHBOARD — hidden until login succeeds -->
+  <div class="dashboard" id="dashboard" style="display:none">
+
+    <!-- Header -->
+    <div class="dashboard-header">
+      <div>
+        <h1>KYC Agent Dashboard</h1>
+        <p class="header-subtitle">Real-time verification session monitoring &amp; fraud intelligence</p>
+      </div>
+      <button id="logoutButton" class="logout-button">Sign Out</button>
+    </div>
+
+    <!-- Stats cards -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-value" id="statTotal">–</div>
+        <div class="stat-label">Total Sessions</div>
+      </div>
+      <div class="stat-card stat-pass">
+        <div class="stat-value" id="statPassed">–</div>
+        <div class="stat-label">Passed</div>
+      </div>
+      <div class="stat-card stat-fail">
+        <div class="stat-value" id="statFailed">–</div>
+        <div class="stat-label">Failed</div>
+      </div>
+      <div class="stat-card stat-review">
+        <div class="stat-value" id="statReview">–</div>
+        <div class="stat-label">Pending Review</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="statPassRate">–</div>
+        <div class="stat-label">Pass Rate</div>
+      </div>
+    </div>
+
+    <!-- Analytics Overview -->
+    <div class="analytics-grid">
+      <div class="analytics-card">
+        <div class="analytics-title">Verdict Distribution</div>
+        <div class="verdict-bar" id="verdictBar">
+          <div class="bar-seg bar-pass" id="barPass" style="width: 0%"></div>
+          <div class="bar-seg bar-review" id="barReview" style="width: 0%"></div>
+          <div class="bar-seg bar-fail" id="barFail" style="width: 0%"></div>
+          <div class="bar-seg bar-incomplete" id="barIncomplete" style="width: 0%"></div>
+        </div>
+        <div class="bar-legend" id="verdictLegend">Loading analytics...</div>
+      </div>
+
+      <div class="analytics-card">
+        <div class="analytics-title">Operational Metrics</div>
+        <div class="metric-row">
+          <span>Avg Match Confidence</span>
+          <strong id="metricAvgConf">–</strong>
+        </div>
+        <div class="metric-row">
+          <span>Avg Fraud Risk</span>
+          <strong id="metricAvgFraud">–</strong>
+        </div>
+        <div class="metric-row">
+          <span>Avg Session Duration</span>
+          <strong id="metricAvgDur">–</strong>
+        </div>
+        <div class="metric-row">
+          <span>Spoof Flagged Rate</span>
+          <strong id="metricSpoofRate">–</strong>
+        </div>
+      </div>
+
+      <div class="analytics-card">
+        <div class="analytics-title">Document Breakdown</div>
+        <div class="doc-pills" id="docBreakdown">–</div>
+      </div>
+    </div>
+
+    <!-- Encrypted Evidence Vault Retention Bar -->
+    <div class="vault-bar">
+      <div class="vault-bar-info">
+        <span class="vault-pill">Encrypted Vault (AES-128 Fernet)</span>
+        <span id="vaultStatsText" class="vault-stats-text">Loading vault stats...</span>
+      </div>
+      <div class="vault-bar-actions">
+        <label class="vault-retention-label" for="vaultRetentionDays">Retention (days):</label>
+        <input id="vaultRetentionDays" type="number" min="0" value="30" class="vault-days-input" />
+        <button id="purgeVaultBtn" class="vault-purge-btn" type="button">Purge Expired</button>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="filter-bar">
+      <button class="filter-btn active" data-filter="ALL">All</button>
+      <button class="filter-btn" data-filter="PASS">Passed</button>
+      <button class="filter-btn" data-filter="FAIL">Failed</button>
+      <button class="filter-btn" data-filter="REVIEW">Review</button>
+      <button class="filter-btn" data-filter="INCOMPLETE">Incomplete</button>
+      <button id="refreshButton" class="refresh-btn">↻ Refresh</button>
+    </div>
+
+    <!-- Session table -->
+    <div class="table-container">
+      <table class="session-table">
+        <thead>
+          <tr>
+            <th>Session ID</th>
+            <th>Date</th>
+            <th>Verdict</th>
+            <th>Match Confidence</th>
+            <th>Fraud Risk</th>
+            <th>Blinks</th>
+            <th>ID Type</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="sessionTableBody">
+          <!-- Rows inserted by JS -->
+        </tbody>
+      </table>
+      <div class="empty-state" id="emptyState" style="display:none">
+        No sessions found for this filter.
+      </div>
+    </div>
+
+  </div>
+
+  <!-- SESSION DETAIL MODAL -->
+  <div class="modal-overlay" id="modalOverlay" style="display:none">
+    <div class="modal">
+      <div class="modal-header">
+        <h2>Session Detail</h2>
+        <button id="closeModal" class="modal-close">✕</button>
+      </div>
+      <div class="modal-body" id="modalBody">
+        <!-- Filled by JS -->
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>

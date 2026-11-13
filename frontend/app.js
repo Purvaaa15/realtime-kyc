@@ -39,15 +39,25 @@ function completeStep(stepNumber) {
   if (step) step.classList.add("complete");
 }
 
-function showResult(passed, message) {
+function showResult(status, message) {
   const card  = document.getElementById("resultCard");
   const title = document.getElementById("resultTitle");
   const msg   = document.getElementById("resultMessage");
 
   card.style.display = "block";
-  card.className     = "result-card " + (passed ? "pass" : "fail");
-  title.textContent  = passed ? "✅ Verification Passed" : "❌ Verification Failed";
-  msg.textContent    = message;
+
+  if (status === true) {
+    card.className    = "result-card pass";
+    title.textContent = "✅ Verification Passed";
+  } else if (status === "review") {
+    card.className    = "result-card review";
+    title.textContent = "⚠️ Flagged for Manual Review";
+  } else {
+    card.className    = "result-card fail";
+    title.textContent = "❌ Verification Failed";
+  }
+
+  msg.textContent = message;
   card.scrollIntoView({ behavior: "smooth" });
 }
 
@@ -397,7 +407,7 @@ async function matchFaceToID() {
     } else if (data.verdict.verdict === "REVIEW") {
       completeStep(4);
       setStatus("⚠️ Flagged for review", "processing");
-      showResult(false, data.verdict.message);
+      showResult("review", data.verdict.message);  // pass a distinct state
     } else {
       setStatus("❌ Verification failed", "error");
       showResult(false, data.verdict.message);

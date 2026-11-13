@@ -23,7 +23,8 @@ import os
 from datetime import datetime
 from dotenv import load_dotenv
 
-load_dotenv()
+BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(BACKEND_DIR, ".env"))
 
 # ---------------------------------------------------------------
 # Redis connection
@@ -45,14 +46,24 @@ SESSION_TTL = int(os.getenv("REDIS_TTL_SECONDS", 900))
 # Generates a new session ID and initialises empty session state
 # in Redis. Returns the session ID to give to the browser.
 # ---------------------------------------------------------------
-def create_session() -> str:
+def create_session(metadata: dict = None) -> str:
     session_id = str(uuid.uuid4())  # e.g. "a3f8c2d1-4b5e-..."
+    meta = metadata or {}
 
     # Initial state for a brand new KYC session
     initial_state = {
         "session_id":       session_id,
+        "tracking_code":    f"KYC-{session_id[:8].upper()}",
         "created_at":       datetime.utcnow().isoformat(),
         "status":           "active",     # active | completed | expired
+
+        # Applicant & biometric consent metadata (FF180 privacy commitment)
+        "user_id":          meta.get("user_id"),
+        "applicant_name":   meta.get("applicant_name"),
+        "applicant_email":  meta.get("applicant_email"),
+        "purpose":          meta.get("purpose"),
+        "consent_given":    bool(meta.get("consent_given", False)),
+        "consent_at":       meta.get("consent_at"),
 
         # Step completion flags
         "face_found":       False,

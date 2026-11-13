@@ -25,3 +25,6 @@ Thumbs.db
 
 # Redis dump file (created automatically by Redis)
 dump.rdb
+
+# React + TypeScript dependencies
+frontend-web/node_modules/
