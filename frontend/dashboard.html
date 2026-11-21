@@ -31,10 +31,30 @@
     <!-- Header -->
     <div class="dashboard-header">
       <div>
-        <h1>KYC Agent Dashboard</h1>
+        <div style="display:flex; align-items:center; gap:12px;">
+          <h1>KYC Agent Dashboard</h1>
+          <span id="liveStatusBadge" class="live-badge live-offline">⚪ Connecting...</span>
+        </div>
         <p class="header-subtitle">Real-time verification session monitoring &amp; fraud intelligence</p>
       </div>
-      <button id="logoutButton" class="logout-button">Sign Out</button>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <button id="testAlertButton" class="chime-test-btn" type="button" title="Test Audio Chime & Desktop Alert">🔔 Test Alert</button>
+        <button id="logoutButton" class="logout-button">Sign Out</button>
+      </div>
+    </div>
+
+    <!-- Live Urgent Alert Banner for Pending Reviews -->
+    <div id="liveAlertBanner" class="live-alert-banner" style="display:none">
+      <div class="live-alert-content">
+        <span class="live-alert-icon">⚠️</span>
+        <div class="live-alert-text" id="liveAlertText">
+          <strong>Review Required:</strong> New applicant flagged for human compliance verification.
+        </div>
+      </div>
+      <div class="live-alert-actions">
+        <button id="liveAlertReviewBtn" class="live-alert-btn" type="button">Inspect &amp; Review</button>
+        <button id="liveAlertDismissBtn" class="live-alert-dismiss" type="button" title="Dismiss">✕</button>
+      </div>
     </div>
 
     <!-- Stats cards -->

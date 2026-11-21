@@ -16,7 +16,7 @@ import {
 import { useAuth } from "../context/AuthContext";
 
 export const Navbar: React.FC = () => {
-  const { user, health, isReviewer, logout } = useAuth();
+  const { user, health, isReviewer, logout, refreshHealth } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const location = useLocation();
 
@@ -71,9 +71,11 @@ export const Navbar: React.FC = () => {
           <div className="nav-right">
             <span
               className="health-pill"
+              onClick={() => refreshHealth?.()}
+              style={{ cursor: "pointer" }}
               title={
                 health
-                  ? `API v${health.version} | Redis: ${health.redis ? "OK" : "Down"} | PostgreSQL: ${health.database === false ? "Down" : "OK"} | Tesseract OCR: ${health.tesseract === false ? "Missing" : "OK"} | AI: ${health.ai_mode || "local-grounded"}`
+                  ? `API v${health.version} | Redis: ${health.redis ? "OK" : "Down"} | PostgreSQL: ${health.database === false ? "Down" : "OK"} | Tesseract OCR: ${health.tesseract === false ? "Missing" : "OK"} | AI: ${health.ai_mode || "local-grounded"} (Click to recheck)`
                   : "Checking backend services..."
               }
             >

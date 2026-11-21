@@ -40,11 +40,14 @@ redis_client = redis.Redis(
 # Session TTL: 15 minutes (900 seconds)
 SESSION_TTL = int(os.getenv("REDIS_TTL_SECONDS", 900))
 
+# In-memory session fallback cache if Redis service is offline
+_memory_sessions: dict[str, dict] = {}
+
 
 # ---------------------------------------------------------------
 # FUNCTION: create_session
 # Generates a new session ID and initialises empty session state
-# in Redis. Returns the session ID to give to the browser.
+# in Redis (or in-memory fallback). Returns session ID to browser.
 # ---------------------------------------------------------------
 def create_session(metadata: dict = None) -> str:
     session_id = str(uuid.uuid4())  # e.g. "a3f8c2d1-4b5e-..."
@@ -87,87 +90,92 @@ def create_session(metadata: dict = None) -> str:
         "user_agent":       None,
     }
 
-    # Store in Redis as JSON string
-    # f"session:{session_id}" is the Redis key
-    # ex=SESSION_TTL sets automatic expiry
-    redis_client.setex(
-        f"session:{session_id}",
-        SESSION_TTL,
-        json.dumps(initial_state)
-    )
+    try:
+        redis_client.setex(
+            f"session:{session_id}",
+            SESSION_TTL,
+            json.dumps(initial_state)
+        )
+    except Exception:
+        _memory_sessions[session_id] = initial_state
 
     return session_id
 
 
 # ---------------------------------------------------------------
 # FUNCTION: get_session
-# Retrieves session data from Redis by session ID.
+# Retrieves session data from Redis (or in-memory cache).
 # Returns None if session doesn't exist or has expired.
 # ---------------------------------------------------------------
 def get_session(session_id: str) -> dict | None:
-    data = redis_client.get(f"session:{session_id}")
+    try:
+        data = redis_client.get(f"session:{session_id}")
+        if data is not None:
+            return json.loads(data)
+    except Exception:
+        pass
 
-    if data is None:
-        return None  # Session expired or never existed
-
-    return json.loads(data)
+    return _memory_sessions.get(session_id)
 
 
 # ---------------------------------------------------------------
 # FUNCTION: update_session
 # Updates specific fields in a session without overwriting others.
 # Also resets the TTL so active sessions don't expire mid-verification.
-#
-# Example:
-#   update_session(sid, {"face_found": True, "liveness_blinks": 2})
 # ---------------------------------------------------------------
 def update_session(session_id: str, updates: dict) -> bool:
-    # Get current state
     current = get_session(session_id)
-
     if current is None:
-        return False  # Session not found
+        return False
 
-    # Merge updates into current state
     current.update(updates)
 
-    # Write back to Redis, reset TTL
-    redis_client.setex(
-        f"session:{session_id}",
-        SESSION_TTL,
-        json.dumps(current)
-    )
+    try:
+        redis_client.setex(
+            f"session:{session_id}",
+            SESSION_TTL,
+            json.dumps(current)
+        )
+    except Exception:
+        _memory_sessions[session_id] = current
 
     return True
 
 
 # ---------------------------------------------------------------
 # FUNCTION: delete_session
-# Explicitly deletes a session from Redis.
-# Called when verification is complete or user requests reset.
+# Explicitly deletes a session from Redis (or in-memory cache).
 # ---------------------------------------------------------------
 def delete_session(session_id: str) -> bool:
-    result = redis_client.delete(f"session:{session_id}")
-    return result > 0
+    deleted = False
+    try:
+        result = redis_client.delete(f"session:{session_id}")
+        deleted = result > 0
+    except Exception:
+        pass
+
+    if session_id in _memory_sessions:
+        del _memory_sessions[session_id]
+        deleted = True
+
+    return deleted
 
 
 # ---------------------------------------------------------------
 # FUNCTION: get_all_sessions
 # Returns a list of all active sessions.
-# Used by the agent dashboard to show all ongoing verifications.
 # ---------------------------------------------------------------
 def get_all_sessions() -> list:
-    # Redis KEYS command finds all keys matching a pattern
-    # WARNING: KEYS is slow on large datasets — use SCAN in production
-    keys = redis_client.keys("session:*")
-
     sessions = []
-    for key in keys:
-        data = redis_client.get(key)
-        if data:
-            sessions.append(json.loads(data))
+    try:
+        keys = redis_client.keys("session:*")
+        for key in keys:
+            data = redis_client.get(key)
+            if data:
+                sessions.append(json.loads(data))
+    except Exception:
+        sessions = list(_memory_sessions.values())
 
-    # Sort by creation time, newest first
     sessions.sort(key=lambda x: x.get("created_at", ""), reverse=True)
     return sessions
 

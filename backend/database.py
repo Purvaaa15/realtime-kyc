@@ -20,7 +20,7 @@ import uuid
 from dotenv import load_dotenv
 
 BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
-load_dotenv(os.path.join(BACKEND_DIR, ".env"))
+load_dotenv(os.path.join(BACKEND_DIR, ".env"), override=True)
 
 # ---------------------------------------------------------------
 # Database connection
@@ -33,7 +33,14 @@ DATABASE_URL = os.getenv(
 )
 
 # create_engine creates the connection pool
-engine = create_engine(DATABASE_URL)
+# pool_pre_ping=True and pool_recycle=300 ensure transparent reconnection
+# when Neon serverless compute wakes from idle or closes idle sockets.
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    pool_recycle=300,
+    connect_args={"connect_timeout": 10},
+)
 
 # SessionLocal is a factory for database sessions (not KYC sessions!)
 # Each request gets its own DB session, uses it, then closes it.
@@ -45,12 +52,19 @@ Base = declarative_base()
 
 def check_database_connection() -> bool:
     """Return True when PostgreSQL answers a lightweight SELECT 1 query."""
-    try:
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        return True
-    except Exception:
-        return False
+    import time
+    for attempt in range(2):
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            return True
+        except Exception as e:
+            if attempt == 0:
+                time.sleep(0.5)
+                continue
+            print(f"[check_database_connection] DB health check warning: {e}")
+            return False
+    return False
 
 
 # ---------------------------------------------------------------

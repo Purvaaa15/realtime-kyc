@@ -14,6 +14,7 @@ import {
   Lock,
   Radio,
   Printer,
+  Bell,
 } from "lucide-react";
 import { apiRequest, buildAuthHeaders } from "../api/client";
 import { useAuth } from "../context/AuthContext";
@@ -26,6 +27,59 @@ import type {
   UserProfile,
   VaultStats,
 } from "../types/kyc";
+
+function playNotificationChime() {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.type = "sine";
+    osc1.frequency.setValueAtTime(587.33, now); // D5
+    gain1.gain.setValueAtTime(0.28, now);
+    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc1.start(now);
+    osc1.stop(now + 0.35);
+
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = "sine";
+    osc2.frequency.setValueAtTime(880.0, now + 0.12); // A5
+    gain2.gain.setValueAtTime(0.32, now + 0.12);
+    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.65);
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.start(now + 0.12);
+    osc2.stop(now + 0.65);
+  } catch (e) {
+    console.warn("Chime error:", e);
+  }
+}
+
+function triggerDesktopNotification(title: string, body: string, onClick?: () => void) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  try {
+    const notif = new Notification(title, {
+      body,
+      icon: "/assets/favicon.ico",
+      requireInteraction: true,
+    });
+    if (onClick) {
+      notif.onclick = () => {
+        window.focus();
+        onClick();
+        notif.close();
+      };
+    }
+  } catch (e) {
+    console.warn("Desktop notification error:", e);
+  }
+}
 
 export const DashboardPage: React.FC = () => {
   const { isReviewer, user, loginWithToken, unlockWithPasscode } = useAuth();
@@ -48,6 +102,14 @@ export const DashboardPage: React.FC = () => {
   const [loadingData, setLoadingData] = useState<boolean>(false);
   const [autoRefresh, setAutoRefresh] = useState<boolean>(false);
   const [bannerMsg, setBannerMsg] = useState<string>("");
+  const [wsConnected, setWsConnected] = useState<boolean>(false);
+  const [urgentAlert, setUrgentAlert] = useState<{
+    id: string;
+    name: string;
+    ref: string;
+    conf?: number;
+    risk?: number;
+  } | null>(null);
 
   // Vault purge confirmation modal state
   const [purgeModalOpen, setPurgeModalOpen] = useState<boolean>(false);
@@ -114,6 +176,103 @@ export const DashboardPage: React.FC = () => {
     }, 10000);
     return () => window.clearInterval(id);
   }, [isReviewer, autoRefresh, verdictFilter, retentionDays]);
+
+  // Real-Time Reviewer Push Notifications (/ws/reviewer)
+  useEffect(() => {
+    if (!isReviewer) return;
+
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+
+    const wsProto = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${wsProto}//${window.location.host}/ws/reviewer`;
+    let ws: WebSocket | null = null;
+    let timer: number | null = null;
+
+    const connect = () => {
+      try {
+        ws = new WebSocket(wsUrl);
+        ws.onopen = () => {
+          setWsConnected(true);
+        };
+        ws.onmessage = (event) => {
+          try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === "NEW_REVIEW_REQUIRED" && msg.session) {
+              playNotificationChime();
+              const s = msg.session;
+              const name = s.applicant_name || "Applicant";
+              const ref = s.tracking_code || (s.id ? s.id.slice(0, 8) : "Pending");
+              const conf = s.match_confidence ? `${Number(s.match_confidence).toFixed(1)}%` : "N/A";
+              const risk = s.fraud_score != null ? `${Number(s.fraud_score).toFixed(1)}/100` : "N/A";
+
+              setUrgentAlert({
+                id: s.id,
+                name,
+                ref,
+                conf: s.match_confidence,
+                risk: s.fraud_score,
+              });
+
+              triggerDesktopNotification(
+                `⚠️ KYC Review Required: ${name}`,
+                `Tracking: ${ref} | Match: ${conf} | Risk: ${risk}\nClick to inspect documents and approve/reject.`,
+                () => {
+                  if (s.id) openDetailModal(s.id);
+                }
+              );
+
+              loadAll(verdictFilter, retentionDays, true);
+            } else if (msg.type === "SESSION_COMPLETED") {
+              const name = msg.applicant_name || "Applicant";
+              const v = msg.verdict || "COMPLETED";
+              setBannerMsg(`✨ New Verification Recorded: ${name} — Result: ${v}`);
+              loadAll(verdictFilter, retentionDays, true);
+            } else if (msg.type === "SESSION_REVIEWED") {
+              loadAll(verdictFilter, retentionDays, true);
+            }
+          } catch {
+            // Heartbeat
+          }
+        };
+        ws.onclose = () => {
+          setWsConnected(false);
+          timer = window.setTimeout(connect, 3500);
+        };
+        ws.onerror = () => {
+          if (ws) ws.close();
+        };
+      } catch (e) {
+        console.warn("WebSocket connect error:", e);
+      }
+    };
+
+    connect();
+
+    return () => {
+      if (timer) window.clearTimeout(timer);
+      if (ws) ws.close();
+    };
+  }, [isReviewer, verdictFilter, retentionDays]);
+
+  const handleTestAlert = () => {
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+    playNotificationChime();
+    setUrgentAlert({
+      id: "test-" + Date.now().toString(16),
+      name: "Test Applicant (Friend/Family)",
+      ref: "KYC-TEST77",
+      conf: 52.4,
+      risk: 28.5,
+    });
+    triggerDesktopNotification(
+      "⚠️ KYC Review Required: Test Applicant",
+      "Tracking: KYC-TEST77 | Match: 52.4% | Risk: 28.5/100\nClick to inspect documents and approve/reject."
+    );
+  };
 
   const closeDetailModal = () => {
     revokeImages();
@@ -386,7 +545,28 @@ export const DashboardPage: React.FC = () => {
           </p>
         </div>
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          {wsConnected ? (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, padding: "5px 10px", background: "rgba(16, 185, 129, 0.15)", color: "#10b981", borderRadius: 6, border: "1px solid rgba(16, 185, 129, 0.3)", fontWeight: 500 }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#10b981", boxShadow: "0 0 6px #10b981" }}></span>
+              Live Alerts Connected
+            </span>
+          ) : (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, padding: "5px 10px", background: "rgba(245, 158, 11, 0.15)", color: "#f59e0b", borderRadius: 6, border: "1px solid rgba(245, 158, 11, 0.3)", fontWeight: 500 }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#f59e0b" }}></span>
+              Connecting Alerts...
+            </span>
+          )}
+
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={handleTestAlert}
+            title="Play sound chime and test browser desktop notification"
+          >
+            <Bell size={14} /> Test Alert
+          </button>
+
           <button
             type="button"
             className={`btn btn-sm ${autoRefresh ? "btn-emerald" : "btn-secondary"}`}
@@ -406,6 +586,61 @@ export const DashboardPage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {urgentAlert && (
+        <div
+          style={{
+            marginBottom: 16,
+            padding: "14px 18px",
+            background: "linear-gradient(90deg, rgba(239, 68, 68, 0.18), rgba(245, 158, 11, 0.12))",
+            border: "1px solid rgba(239, 68, 68, 0.4)",
+            borderRadius: 8,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: 12,
+            boxShadow: "0 4px 16px rgba(239, 68, 68, 0.12)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 36, height: 36, borderRadius: "50%", background: "rgba(239, 68, 68, 0.25)", display: "flex", alignItems: "center", justifyContent: "center", color: "#ef4444" }}>
+              <Bell size={20} />
+            </div>
+            <div>
+              <div style={{ fontWeight: 700, color: "#fca5a5", fontSize: 15 }}>
+                ⚠️ Action Required: KYC Verification Flagged for Review!
+              </div>
+              <div style={{ fontSize: 13, color: "var(--text-muted)", marginTop: 2 }}>
+                Applicant: <strong style={{ color: "var(--text-main)" }}>{urgentAlert.name}</strong> ({urgentAlert.ref})
+                {urgentAlert.conf != null && <span> · Match Conf: <strong>{Number(urgentAlert.conf).toFixed(1)}%</strong></span>}
+                {urgentAlert.risk != null && <span> · Fraud Score: <strong>{Number(urgentAlert.risk).toFixed(1)}/100</strong></span>}
+              </div>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {urgentAlert.id && !urgentAlert.id.startsWith("test-") && (
+              <button
+                type="button"
+                className="btn btn-emerald btn-sm"
+                onClick={() => {
+                  openDetailModal(urgentAlert.id);
+                  setUrgentAlert(null);
+                }}
+              >
+                Inspect & Review
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setUrgentAlert(null)}
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {bannerMsg && (
         <div className="alert alert-info" style={{ marginBottom: 14, justifyContent: "space-between", alignItems: "center", flexWrap: "wrap" }}>

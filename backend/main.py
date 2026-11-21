@@ -6,6 +6,17 @@
 #   - PostgreSQL audit logging
 #   - Explainable verdicts with reasons
 
+import sys
+import os
+
+# Ensure backend directory is in Python module search path
+_BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+if _BACKEND_DIR not in sys.path:
+    sys.path.insert(0, _BACKEND_DIR)
+
+from dotenv import load_dotenv
+load_dotenv(os.path.join(_BACKEND_DIR, ".env"), override=True)
+
 from spoof_detector import analyze_spoof, extract_face_region
 from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect, Depends, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -118,6 +129,30 @@ app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
 # Now stored per session_id, not globally
 # ---------------------------------------------------------------
 liveness_checkers: dict[str, LivenessChecker] = {}
+
+# ---------------------------------------------------------------
+# Real-Time Reviewer Notification Hub
+# Manages active WebSocket connections to the Reviewer Dashboard
+# ---------------------------------------------------------------
+class ReviewerNotificationHub:
+    def __init__(self):
+        self.active_reviewers: set[WebSocket] = set()
+
+    async def connect(self, ws: WebSocket):
+        await ws.accept()
+        self.active_reviewers.add(ws)
+
+    def disconnect(self, ws: WebSocket):
+        self.active_reviewers.discard(ws)
+
+    async def broadcast(self, data: dict):
+        for ws in list(self.active_reviewers):
+            try:
+                await ws.send_json(data)
+            except Exception:
+                self.disconnect(ws)
+
+reviewer_hub = ReviewerNotificationHub()
 
 # Rolling buffer of recent spoof scores per session — smooths out
 # frame-to-frame noise so one bad frame doesn't permanently flag
@@ -538,6 +573,34 @@ async def match_face(
     if final_session:
         save_session_to_db(final_session)
 
+    # Real-time Reviewer Alert Notification
+    try:
+        if verdict.get("verdict") == "REVIEW":
+            await reviewer_hub.broadcast({
+                "type": "NEW_REVIEW_REQUIRED",
+                "session": {
+                    "id": session_id,
+                    "tracking_code": (final_session or {}).get("tracking_code") or session_id[:8],
+                    "applicant_name": (final_session or {}).get("applicant_name") or "Applicant",
+                    "verdict": verdict.get("verdict"),
+                    "verdict_message": verdict.get("message"),
+                    "match_confidence": confidence,
+                    "fraud_score": fraud_result.get("fraud_score", 0.0),
+                    "created_at": str((final_session or {}).get("created_at") or datetime.utcnow()),
+                    "reasons": verdict.get("verdict_reasons", []),
+                }
+            })
+        else:
+            await reviewer_hub.broadcast({
+                "type": "SESSION_COMPLETED",
+                "session_id": session_id,
+                "applicant_name": (final_session or {}).get("applicant_name") or "Applicant",
+                "verdict": verdict.get("verdict"),
+                "tracking_code": (final_session or {}).get("tracking_code") or session_id[:8],
+            })
+    except Exception as e:
+        print(f"[ReviewerHub] Broadcast alert error: {e}")
+
     # Clean up liveness checker
     if session_id in liveness_checkers:
         del liveness_checkers[session_id]
@@ -688,6 +751,17 @@ async def dashboard_review_session(session_id: str, data: dict, request: Request
     log_audit_event(session_id, "agent_review", {
         "action": action, "reviewer": reviewer, "note": note
     }, actor=reviewer)
+
+    # Broadcast review resolution event to all active reviewer dashboards
+    try:
+        await reviewer_hub.broadcast({
+            "type": "SESSION_REVIEWED",
+            "session_id": session_id,
+            "action": action,
+            "reviewer": reviewer
+        })
+    except Exception as e:
+        print(f"[ReviewerHub] Broadcast review resolution error: {e}")
 
     return {"success": True, "message": f"Session {action} by {reviewer}"}
 
@@ -1223,6 +1297,28 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         if session_id in spoof_score_history:
             del spoof_score_history[session_id]
         print(f"WebSocket disconnected: {session_id[:8]}")
+
+
+# ---------------------------------------------------------------
+# ROUTE: WebSocket /ws/reviewer
+# Real-time bidirectional push channel for the Compliance Reviewer Portal.
+# Pushes instant alerts when a verification requires human review.
+# ---------------------------------------------------------------
+@app.websocket("/ws/reviewer")
+async def reviewer_websocket_endpoint(websocket: WebSocket):
+    await reviewer_hub.connect(websocket)
+    try:
+        # Confirm connection to client
+        await websocket.send_json({"type": "CONNECTED", "message": "Reviewer Notification Channel Active"})
+        while True:
+            # Keep connection alive, listen for ping/heartbeat
+            msg = await websocket.receive_text()
+            if msg == "ping":
+                await websocket.send_text("pong")
+    except WebSocketDisconnect:
+        reviewer_hub.disconnect(websocket)
+    except Exception:
+        reviewer_hub.disconnect(websocket)
 
 
 # ---------------------------------------------------------------

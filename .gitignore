@@ -28,3 +28,9 @@ dump.rdb
 
 # React + TypeScript dependencies
 frontend-web/node_modules/
+
+# Scratch & temporary workspace files
+scratch/
+
+# Local project documents & reports (keep local only)
+major project documents/

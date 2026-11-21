@@ -32,7 +32,7 @@ export const App: React.FC = () => {
             </Routes>
           </main>
           <footer className="footer">
-            PehchaanAI · Real-Time Video KYC &amp; Fraud Intelligence · Dept. of Computer Engineering (Group BTech CS-A 47)
+            PehchaanAI · Real-Time Video KYC &amp; Fraud Intelligence
           </footer>
           <AssistantDrawer />
         </div>

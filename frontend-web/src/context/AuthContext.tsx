@@ -15,6 +15,7 @@ interface AuthContextValue {
   unlockWithPasscode: (passcode: string) => void;
   logout: () => void;
   refreshUser: () => Promise<void>;
+  refreshHealth: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -44,9 +45,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const refreshHealth = () => {
+    apiRequest<HealthStatus>("/health").then(setHealth).catch(() => setHealth(null));
+  };
+
   useEffect(() => {
     refreshUser();
-    apiRequest<HealthStatus>("/health").then(setHealth).catch(() => setHealth(null));
+    refreshHealth();
+    const timer = window.setInterval(refreshHealth, 10000);
+    return () => window.clearInterval(timer);
   }, []);
 
   const loginWithToken = (token: string, nextUser: UserProfile) => {
@@ -84,6 +91,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         unlockWithPasscode,
         logout,
         refreshUser,
+        refreshHealth,
       }}
     >
       {children}

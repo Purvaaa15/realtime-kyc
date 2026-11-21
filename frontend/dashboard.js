@@ -115,6 +115,8 @@ logoutButton.addEventListener("click", () => {
 // ---------------------------------------------------------------
 async function loadDashboard() {
   await Promise.all([loadStats(), loadAnalytics(), loadSessions(), loadVaultStats()]);
+  initReviewerSocket();
+  requestNotificationPermission();
 }
 
 // ---------------------------------------------------------------
@@ -579,5 +581,220 @@ if (purgeVaultBtn) {
       purgeVaultBtn.disabled = false;
       purgeVaultBtn.textContent = "Purge Expired";
     }
+  });
+}
+
+// ===============================================================
+// REAL-TIME REVIEWER NOTIFICATIONS ENGINE
+// WebSockets + Web Audio API Chime + Native Desktop Notification
+// ===============================================================
+
+let reviewerWs = null;
+let wsHeartbeatInterval = null;
+let liveFallbackTimer = null;
+
+// Request browser desktop notification permission
+function requestNotificationPermission() {
+  if ("Notification" in window && Notification.permission === "default") {
+    Notification.requestPermission().then((perm) => {
+      console.log("[ReviewerNotification] Desktop permission:", perm);
+    });
+  }
+}
+
+// Synthesize alert chime using Web Audio API (zero external sound files needed)
+function playNotificationChime() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+
+    // First tone (587.33 Hz - D5)
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.type = "sine";
+    osc1.frequency.setValueAtTime(587.33, now);
+    gain1.gain.setValueAtTime(0.28, now);
+    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc1.start(now);
+    osc1.stop(now + 0.35);
+
+    // Second cheerful chime tone (880.0 Hz - A5)
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = "sine";
+    osc2.frequency.setValueAtTime(880.0, now + 0.12);
+    gain2.gain.setValueAtTime(0.32, now + 0.12);
+    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.start(now + 0.12);
+    osc2.stop(now + 0.6);
+  } catch (e) {
+    console.warn("[ReviewerNotification] Audio chime failed:", e);
+  }
+}
+
+// Trigger native OS Desktop Notification
+function triggerDesktopNotification(session) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+
+  const name = session.applicant_name || "Applicant";
+  const ref = session.tracking_code || (session.id ? session.id.slice(0, 8) : "Pending");
+  const conf = session.match_confidence ? `${Number(session.match_confidence).toFixed(1)}%` : "N/A";
+  const risk = session.fraud_score != null ? `${Number(session.fraud_score).toFixed(1)}/100` : "N/A";
+
+  const notif = new Notification("⚠️ KYC Review Required — Action Needed", {
+    body: `${name} (${ref})\nConfidence: ${conf} | Fraud Risk: ${risk}\nClick to inspect documents and approve/reject.`,
+    icon: "/assets/favicon.ico",
+    requireInteraction: true,
+    tag: "kyc-review-" + (session.id || Date.now()),
+  });
+
+  notif.onclick = () => {
+    window.focus();
+    if (session.id) {
+      openSessionDetail(session.id);
+    }
+    notif.close();
+  };
+}
+
+// Show urgent in-app banner at top of dashboard
+function showLiveAlertBanner(session) {
+  const banner = document.getElementById("liveAlertBanner");
+  const textEl = document.getElementById("liveAlertText");
+  const reviewBtn = document.getElementById("liveAlertReviewBtn");
+  const dismissBtn = document.getElementById("liveAlertDismissBtn");
+  if (!banner || !textEl) return;
+
+  const name = session.applicant_name || "Applicant";
+  const ref = session.tracking_code || (session.id ? session.id.slice(0, 8) : "Pending");
+  const conf = session.match_confidence ? `${Number(session.match_confidence).toFixed(1)}%` : "N/A";
+  const risk = session.fraud_score != null ? `${Number(session.fraud_score).toFixed(1)}/100` : "N/A";
+
+  textEl.innerHTML = `<strong>⚠️ Verification Flagged for Review:</strong> <strong>${name}</strong> (${ref}) requires compliance verification. Match: <strong>${conf}</strong> | Risk: <strong>${risk}</strong>`;
+  banner.style.display = "flex";
+
+  if (reviewBtn) {
+    reviewBtn.onclick = () => {
+      if (session.id) {
+        openSessionDetail(session.id);
+      }
+      banner.style.display = "none";
+    };
+  }
+
+  if (dismissBtn) {
+    dismissBtn.onclick = () => {
+      banner.style.display = "none";
+    };
+  }
+}
+
+// Connect WebSocket to /ws/reviewer
+function initReviewerSocket() {
+  if (reviewerWs && (reviewerWs.readyState === WebSocket.OPEN || reviewerWs.readyState === WebSocket.CONNECTING)) {
+    return;
+  }
+
+  const badge = document.getElementById("liveStatusBadge");
+  if (badge) {
+    badge.className = "live-badge live-connecting";
+    badge.textContent = "🟡 Connecting...";
+  }
+
+  const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const wsUrl = `${wsProtocol}//${window.location.host}/ws/reviewer`;
+
+  try {
+    reviewerWs = new WebSocket(wsUrl);
+
+    reviewerWs.onopen = () => {
+      console.log("[ReviewerNotification] WebSocket connected to /ws/reviewer");
+      if (badge) {
+        badge.className = "live-badge live-online";
+        badge.textContent = "🟢 Live Alerts Active";
+      }
+
+      // Heartbeat ping every 25 seconds
+      if (wsHeartbeatInterval) clearInterval(wsHeartbeatInterval);
+      wsHeartbeatInterval = setInterval(() => {
+        if (reviewerWs && reviewerWs.readyState === WebSocket.OPEN) {
+          reviewerWs.send("ping");
+        }
+      }, 25000);
+    };
+
+    reviewerWs.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === "NEW_REVIEW_REQUIRED" && msg.session) {
+          console.log("[ReviewerNotification] New review required:", msg.session);
+          playNotificationChime();
+          triggerDesktopNotification(msg.session);
+          showLiveAlertBanner(msg.session);
+
+          // Immediately update list & stats without full page reload
+          loadSessions();
+          loadStats();
+          loadAnalytics();
+        } else if (msg.type === "SESSION_REVIEWED" || msg.type === "SESSION_COMPLETED") {
+          loadSessions();
+          loadStats();
+          loadAnalytics();
+        }
+      } catch (err) {
+        // Pong or non-JSON message
+      }
+    };
+
+    reviewerWs.onclose = () => {
+      if (badge) {
+        badge.className = "live-badge live-offline";
+        badge.textContent = "⚪ Offline (Reconnecting)";
+      }
+      if (wsHeartbeatInterval) clearInterval(wsHeartbeatInterval);
+      setTimeout(initReviewerSocket, 3500); // Reconnect
+    };
+
+    reviewerWs.onerror = () => {
+      if (reviewerWs) reviewerWs.close();
+    };
+  } catch (e) {
+    console.error("[ReviewerNotification] Failed to create WebSocket:", e);
+    setTimeout(initReviewerSocket, 5000);
+  }
+
+  // Backup polling every 30s in case WebSockets are temporarily blocked
+  if (!liveFallbackTimer) {
+    liveFallbackTimer = setInterval(() => {
+      const dashboardEl = document.getElementById("dashboard");
+      if (dashboardEl && dashboardEl.style.display !== "none") {
+        loadSessions();
+        loadStats();
+      }
+    }, 30000);
+  }
+}
+
+// Hook up "Test Alert" button so user can test sound & notification anytime
+const testAlertBtn = document.getElementById("testAlertButton");
+if (testAlertBtn) {
+  testAlertBtn.addEventListener("click", () => {
+    requestNotificationPermission();
+    playNotificationChime();
+    const dummySession = {
+      id: "test-" + Date.now().toString(16),
+      tracking_code: "KYC-TEST77",
+      applicant_name: "Test Applicant (Friend/Family)",
+      match_confidence: 52.4,
+      fraud_score: 28.5,
+    };
+    triggerDesktopNotification(dummySession);
+    showLiveAlertBanner(dummySession);
   });
 }
